@@ -1,4 +1,3 @@
-# Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -6,22 +5,12 @@ __pycache__/
 *.pdb
 *.egg-info/
 *.egg
-
-# Virtual environment
 venv/
 env/
 .venv/
-
-# PyCharm
 .idea/
-
-# Logs
 logs/
 *.log
-
-# OS files
 .DS_Store
 Thumbs.db
-
-# Config (keep token safe!)
 config.py
