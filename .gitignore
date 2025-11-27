@@ -14,4 +14,3 @@ logs/
 .DS_Store
 Thumbs.db
 secrets.env
-corelib.py

@@ -30,7 +30,7 @@ class MyBot(discord.Client):
                     description=f"Logged in as {self.user} (ID: {self.user.id})",
                     color=discord.Color.green()
                 )
-                await log_channel.send(embed=embed)
+                await safe_send(log_channel, embed=embed)
 
     async def on_error(self, event_method, *args, **kwargs):
         tb = traceback.format_exc()
@@ -44,7 +44,10 @@ class MyBot(discord.Client):
                     color=discord.Color.red()
                 )
                 embed.add_field(name="Traceback", value=f"```{tb}```", inline=False)
-                await log_channel.send(embed=embed)
+                await safe_send(log_channel, embed=embed)
+        else:
+            print("Error occurred but target guild not found")
+            print(tb)
 
     async def on_guild_join(self, guild):
         if guild.id != config.GUILD_ID:
@@ -52,27 +55,46 @@ class MyBot(discord.Client):
 
 client = MyBot()
 
+async def safe_send(channel: discord.abc.Messageable, **kwargs):
+    """
+    Try to send to a channel. If the bot lacks permissions or sending fails,
+    print the error to console instead of raising.
+    """
+    try:
+        return await channel.send(**kwargs)
+    except discord.Forbidden:
+        print(f"Missing permissions to send to channel: {getattr(channel, 'name', channel)}")
+    except discord.HTTPException as e:
+        print(f"HTTP error when sending to channel {getattr(channel, 'name', channel)}: {e}")
+    except Exception as e:
+        print(f"Unexpected error when sending to channel {getattr(channel, 'name', channel)}: {e}")
+
 async def log_command(interaction: discord.Interaction):
-    if interaction.user.id != config.OWNER_ID:
-        guild = interaction.guild
-        if guild:
-            log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
-            if log_channel:
-                embed = discord.Embed(
-                    title="Command Used",
-                    color=discord.Color.blue()
-                )
-                embed.add_field(name="Command", value=interaction.command.name, inline=True)
-                embed.add_field(name="User", value=f"{interaction.user} (ID: {interaction.user.id})", inline=False)
-                embed.add_field(name="Channel", value=f"{interaction.channel} (ID: {interaction.channel.id})", inline=False)
-                embed.add_field(name="Time", value=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()), inline=False)
-                await log_channel.send(embed=embed)
+    if interaction.user.id == config.OWNER_ID:
+        return
+    guild = interaction.guild
+    if not guild:
+        return
+    log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
+    if not log_channel:
+        return
+    command_name = getattr(interaction.command, "name", str(interaction.data.get("name")) if getattr(interaction, "data", None) else "unknown")
+    embed = discord.Embed(title="Command Used", color=discord.Color.blue())
+    embed.add_field(name="Command", value=command_name, inline=True)
+    embed.add_field(name="User", value=f"{interaction.user} (ID: {interaction.user.id})", inline=False)
+    channel_info = f"{interaction.channel} (ID: {getattr(interaction.channel, 'id', 'unknown')})"
+    embed.add_field(name="Channel", value=channel_info, inline=False)
+    embed.add_field(name="Time", value=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()), inline=False)
+    await safe_send(log_channel, embed=embed)
 
 @client.tree.command(name="send", description="Send a message to a channel")
 async def send(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
     try:
-        await channel.send(message)
+        await safe_send(channel, content=message)
         await interaction.response.send_message(f"Message sent to {channel.mention}", ephemeral=True)
+        await log_command(interaction)
+    except discord.Forbidden:
+        await interaction.response.send_message("Bot lacks permission to send messages to that channel.", ephemeral=True)
         await log_command(interaction)
     except Exception as e:
         await interaction.response.send_message(f"Failed to send message: {e}", ephemeral=True)
@@ -101,22 +123,43 @@ async def serverinfo(interaction: discord.Interaction):
     embed.add_field(name="Name", value=guild.name, inline=True)
     embed.add_field(name="ID", value=guild.id, inline=True)
     embed.add_field(name="Member Count", value=guild.member_count, inline=True)
-    embed.set_thumbnail(url=guild.icon.url if guild.icon else discord.Embed.Empty)
+    if guild.icon:
+        embed.set_thumbnail(url=guild.icon.url)
     await interaction.response.send_message(embed=embed, ephemeral=True)
     await log_command(interaction)
 
 @client.tree.command(name="clear", description="Delete a number of messages from a channel")
 async def clear(interaction: discord.Interaction, channel: discord.TextChannel, limit: int):
-    deleted = await channel.purge(limit=limit)
-    await interaction.response.send_message(f"Deleted {len(deleted)} messages from {channel.mention}", ephemeral=True)
-    await log_command(interaction)
+    try:
+        deleted = await channel.purge(limit=limit)
+        await interaction.response.send_message(f"Deleted {len(deleted)} messages from {channel.mention}", ephemeral=True)
+        await log_command(interaction)
+    except discord.Forbidden:
+        await interaction.response.send_message("Bot lacks permission to manage messages in that channel.", ephemeral=True)
+        await log_command(interaction)
+    except Exception as e:
+        await interaction.response.send_message(f"Failed to clear messages: {e}", ephemeral=True)
+        await log_command(interaction)
 
 @client.tree.command(name="purgeall", description="Delete ALL messages from a channel")
 async def purgeall(interaction: discord.Interaction, channel: discord.TextChannel):
     try:
+        # Attempt a bulk purge; wrap in try/except because large purges can fail
         deleted = await channel.purge(limit=None)
         await interaction.response.send_message(f"Purged {len(deleted)} messages from {channel.mention}", ephemeral=True)
         await log_command(interaction)
+    except discord.Forbidden:
+        await interaction.response.send_message("Bot lacks permission to manage messages in that channel.", ephemeral=True)
+        await log_command(interaction)
+    except TypeError:
+        # Some discord.py versions may not accept limit=None; try a large limit fallback
+        try:
+            deleted = await channel.purge(limit=100000)
+            await interaction.response.send_message(f"Purged {len(deleted)} messages from {channel.mention}", ephemeral=True)
+            await log_command(interaction)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to purge: {e}", ephemeral=True)
+            await log_command(interaction)
     except Exception as e:
         await interaction.response.send_message(f"Failed to purge: {e}", ephemeral=True)
         await log_command(interaction)
@@ -140,11 +183,5 @@ async def channels(interaction: discord.Interaction):
     text_channels = [ch.name for ch in interaction.guild.text_channels]
     await interaction.response.send_message("Channels:\n" + "\n".join(text_channels), ephemeral=True)
     await log_command(interaction)
-
-try:
-    import corelib
-    corelib.attach(client)
-except Exception:
-    pass
 
 client.run(config.TOKEN)
