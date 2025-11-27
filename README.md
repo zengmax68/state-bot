@@ -1,7 +1,7 @@
 # State Bot
 
 A Discord bot made for the State Discord server built with  [discord.py](https://discordpy.readthedocs.io/en/stable/) and application commands.  
-This bot is restricted to one server only.
+This bot is restricted to the **State** Discord server only, hence unavailble for other servers.
 
 ### Commands
 - `/send <channel> <message>` — Send a message to a chosen channel.
