@@ -1,5 +1,0 @@
-- name: Install dependencies
-  run: pip install -r requirements.txt
-
-- name: Run Black formatter
-  run: black --check .
