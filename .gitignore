@@ -15,5 +15,3 @@ logs/
 Thumbs.db
 secrets.env
 corelib.py
-
-corelib.py
